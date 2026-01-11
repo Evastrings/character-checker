@@ -48,8 +48,10 @@ export default function Home() {
       formData.append('files', file);
     });
 
+    const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000';
+
     try {
-      const res = await fetch('http://127.0.0.1:8000/analyze', {
+      const res = await fetch(`${API_URL}/analyze`, {
         method: 'POST',
         body: formData,
       });
@@ -128,51 +130,26 @@ export default function Home() {
                 </div>
               )}
               
-              // it starts here
               {previews.length > 0 && (
-                <div className="space-y-3">
-                  <p className="text-sm font-medium text-gray-700">
+                <div>
+                  <p className="text-sm font-medium text-gray-700 mb-3">
                     {previews.length} image{previews.length > 1 ? 's' : ''} selected
                   </p>
-                  
-                  {/* Grid for 2-3 images */}
-                  {previews.length <= 3 && (
-                    <div className="grid grid-cols-2 gap-3">
-                      {previews.map((preview, i) => (
-                        <div key={i} className="relative rounded-lg border-2 border-blue-200 bg-gray-50 overflow-hidden">
-                          <img
-                            src={preview}
-                            alt={`Preview ${i + 1}`}
-                            className="w-full h-40 object-contain p-2"
-                          />
-                          <div className="absolute top-2 left-2 bg-blue-600 text-white text-xs px-2 py-1 rounded-full font-semibold">
-                            Image {i + 1}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                  
-                  {/* Scrollable row for 4-5 images */}
-                  {previews.length > 3 && (
-                    <div className="flex gap-3 overflow-x-auto pb-2">
-                      {previews.map((preview, i) => (
-                        <div key={i} className="relative flex-shrink-0 w-32 rounded-lg border-2 border-blue-200 bg-gray-50 overflow-hidden">
-                          <img
-                            src={preview}
-                            alt={`Preview ${i + 1}`}
-                            className="w-full h-32 object-contain p-1"
-                          />
-                          <div className="absolute top-1 left-1 bg-blue-600 text-white text-xs px-1.5 py-0.5 rounded-full font-semibold">
-                            {i + 1}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
+                  <div className="grid grid-cols-3 gap-3">
+                    {previews.map((preview, i) => (
+                      <div key={i} className="relative group">
+                        <img
+                          src={preview}
+                          alt={`Preview ${i + 1}`}
+                          className="w-full h-24 object-cover rounded-lg border-2 border-gray-200"
+                        />
+                        <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-30 transition-opacity rounded-lg" />
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
-              // It ends here bruv
+              
               <button
                 type="submit"
                 disabled={loading || !files}
