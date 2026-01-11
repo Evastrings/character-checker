@@ -2,17 +2,13 @@
 
 An AI-powered tool that helps anime artists and character designers maintain visual consistency across multiple character designs.
 
-![Demo1]
-(demo/demo1.png)
+![Demo1](demo/demo1.png)
 
-![Demo2]
-(demo/demo2.png)
+![Demo2](demo/demo2.png)
 
-![Demo3]
-(demo/demo3.png)
+![Demo3](demo/demo3.png)
 
-![Demo4]
-(demo/demo4.png)
+![Demo4](demo/demo4.png)
 
 
 🔗 **Live Demo:** https://character-checker.vercel.app
