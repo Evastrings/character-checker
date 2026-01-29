@@ -1,33 +1,38 @@
-from fastapi import FastAPI, UploadFile, File
+from fastapi import FastAPI, UploadFile, File, Request
 from fastapi.middleware.cors import CORSMiddleware
 from typing import List
 from PIL import Image
 import numpy as np
 from sklearn.cluster import KMeans
-import google.generativeai as genai
+from google import genai  # NEW IMPORT
 import os
 import io
 from dotenv import load_dotenv
 
 # Load environment variables
 load_dotenv()
-PORT = int(os.getenv("PORT", 8000))
 
 app = FastAPI(title="Character Consistency Checker")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://character-checker.vercel.app", 
-        "http://localhost:3000"],
+    allow_origins=[
+        "http://localhost:3000",
+        "https://character-checker.vercel.app",
+        "https://*.vercel.app",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Configure Gemini
-genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
+# Configure Gemini with NEW SDK
+client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
 
-# Your existing color extraction functions
+# Get port from environment
+PORT = int(os.getenv("PORT", 8000))
+
+# existing color extraction functions
 def extract_dominant_colors(image_path, n_colors=5, resize_dim=(100, 100)):
     """Extract dominant colors from an image using K-means clustering."""
     im = Image.open(image_path)
@@ -74,15 +79,17 @@ def compare_palettes(palette1, palette2):
     return similarity
 
 def analyze_with_gemini(image_paths):
-    """Use Gemini Vision to analyze character consistency"""
+    """Use Gemini Vision to analyze character consistency - NEW SDK"""
     
-    # Load images for Gemini
-    images = [Image.open(path) for path in image_paths]
+    # Load images as bytes
+    images = []
+    for path in image_paths:
+        with open(path, 'rb') as f:
+            images.append({
+                'mime_type': 'image/png',
+                'data': f.read()
+            })
     
-    # Create the model
-    model = genai.GenerativeModel('gemini-2.5-flash')
-    
-    # Improved prompt with better scoring guidelines
     prompt = f"""You are an expert character designer analyzing {len(images)} images to determine if they show the same character.
 
 **Your task:** Evaluate how consistent this character is across all images.
@@ -96,9 +103,9 @@ def analyze_with_gemini(image_paths):
 
 **Analyze these aspects:**
 1. **Physical Features**: Hair (style, length, color), eyes (shape, color), face structure, body proportions
-2. **Character Identity**: Are these recognizably the same character? Would a viewer identify them as the same person?
+2. **Character Identity**: Are these recognizably the same character?
 3. **Art Style**: Consistent drawing style, line work quality, shading technique
-4. **Distinctive Features**: Unique markings, accessories, clothing elements that define this character
+4. **Distinctive Features**: Unique markings, accessories, clothing elements
 
 **IMPORTANT:** 
 - If images appear identical or nearly identical, score should be 95-100
@@ -110,7 +117,7 @@ Provide your analysis in this EXACT format:
 CONSISTENCY_SCORE: [single number from 0-100]
 
 KEY_FEATURES:
-- [List 3-5 defining features that SHOULD stay consistent, e.g., "Long silver hair with red streak"]
+- [List 3-5 defining features that SHOULD stay consistent]
 - [Focus on the most distinctive/recognizable features]
 
 ISSUES:
@@ -123,11 +130,32 @@ RECOMMENDATIONS:
 
 Focus on character identity and defining features. Ignore backgrounds, poses, and minor artistic variations."""
 
-    # Generate response
-    response = model.generate_content([prompt] + images)
+    # Try models with fallbacks
+    model_names = [
+        'gemini-2.0-flash-thinking-exp-01-21',
+        'gemini-2.0-flash-exp',
+        'gemini-1.5-flash',
+    ]
     
-    return response.text
-
+    for model_name in model_names:
+        try:
+            # Build content
+            contents = [prompt]
+            for img in images:
+                contents.append(img)
+            
+            response = client.models.generate_content(
+                model=model_name,
+                contents=contents
+            )
+            
+            return response.text
+            
+        except Exception as e:
+            print(f"Model {model_name} failed: {e}")
+            continue
+    
+    raise Exception("All Gemini models failed")
 
 def parse_ai_response(text):
     """Parse AI's structured response"""
@@ -146,7 +174,6 @@ def parse_ai_response(text):
         if line.startswith('CONSISTENCY_SCORE:'):
             try:
                 score_text = line.split(':')[1].strip()
-                # Extract just the number
                 result['consistency_score'] = int(''.join(filter(str.isdigit, score_text)))
             except:
                 result['consistency_score'] = 75
@@ -158,7 +185,6 @@ def parse_ai_response(text):
         elif line.startswith('RECOMMENDATIONS:'):
             current_section = 'recommendations'
         elif line and current_section:
-            # Remove bullet points and dashes
             clean_line = line.lstrip('-•* ').strip()
             if clean_line and not clean_line.endswith(':'):
                 result[current_section].append(clean_line)
@@ -171,56 +197,44 @@ def read_root():
 
 @app.post("/analyze")
 async def analyze_character(files: List[UploadFile] = File(...)):
-    """
-    Accept 2-5 images, analyze with YOUR color extraction + Gemini Vision
-    """
+    """Accept 2-5 images, analyze with color extraction + Gemini Vision"""
+    
     if len(files) < 2 or len(files) > 5:
         return {"error": "Please upload 2-5 images"}
     
-    # Create temp directory
     os.makedirs("temp_uploads", exist_ok=True)
     
-    # Save images and extract palettes
     image_paths = []
     palettes = []
     
     for idx, file in enumerate(files):
         file_path = f"temp_uploads/image_{idx}.png"
         
-        # Read and save file
         content = await file.read()
         
         try:
-            # Open with PIL to validate and convert
             img = Image.open(io.BytesIO(content))
-            
-            # Convert to RGB if needed to handle RGBA, grayscale etc
             if img.mode != 'RGB':
                 img = img.convert('RGB')
             
-            # Resizing the image if it's too large (max 2048px on longest side)
             max_size = 2048
             if max(img.size) > max_size:
                 ratio = max_size / max(img.size)
                 new_size = tuple(int(dim * ratio) for dim in img.size)
                 img = img.resize(new_size, Image.Resampling.LANCZOS)
             
-            # Saved as PNG
             img.save(file_path, 'PNG')
             
         except Exception as e:
             print(f"Error processing image {idx}: {e}")
-            # Saving original if conversion fails
             with open(file_path, "wb") as f:
                 f.write(content)
         
         image_paths.append(file_path)
-        
-        # Extract palette using YOUR code
         palette = extract_palette(file_path)
         palettes.append(palette)
     
-    # Your color analysis
+    # Color similarity
     palette_similarities = []
     for i in range(len(palettes)):
         for j in range(i + 1, len(palettes)):
@@ -229,29 +243,22 @@ async def analyze_character(files: List[UploadFile] = File(...)):
     
     avg_color_similarity = sum(palette_similarities) / len(palette_similarities) if palette_similarities else 0
     
-    # Gemini Vision analysis
+    # Gemini analysis
     try:
         gemini_analysis = analyze_with_gemini(image_paths)
         parsed = parse_ai_response(gemini_analysis)
-        
-        # Use Gemini's score as primary
         consistency_score = parsed['consistency_score']
         
-        # Add color-specific insights if needed
-        # Only add color warning if it's meaningfully low AND Gemini found issues
         if avg_color_similarity < 30 and consistency_score < 70:
-            parsed['issues'].append(f"Color palette shows variation ({round(avg_color_similarity)}% similarity) - this may be due to different backgrounds or lighting")
+            parsed['issues'].append(f"Color palette shows variation ({round(avg_color_similarity)}% similarity) - may be due to different backgrounds or lighting")
         elif avg_color_similarity >= 60:
-            # Add positive note if colors ARE consistent
             if "excellent consistency" not in str(parsed['recommendations']).lower():
                 parsed['recommendations'].append(f"Color palette is consistent ({round(avg_color_similarity)}% similarity)")
-
-        # Special handling for highly consistent results
+        
         if consistency_score >= 95 and not any("None detected" in issue for issue in parsed['issues']):
             parsed['issues'] = ["None detected - character maintains excellent consistency"]
-
+        
     except Exception as e:
-        # Fallback if Gemini fails
         print(f"Gemini API error: {e}")
         consistency_score = round(avg_color_similarity)
         parsed = {
@@ -272,9 +279,9 @@ async def analyze_character(files: List[UploadFile] = File(...)):
             "color_similarity": round(avg_color_similarity, 2)
         },
         "analysis_type": "Gemini AI Vision + Color Analysis",
-        "model": "gemini-2.5-flash"
+        "model": "gemini-2.0-flash-thinking"
     }
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=PORT)
