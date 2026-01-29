@@ -80,7 +80,7 @@ def analyze_with_gemini(image_paths):
     images = [Image.open(path) for path in image_paths]
     
     # Create the model
-    model = genai.GenerativeModel('gemini-2.0-flash-exp')
+    model = genai.GenerativeModel('gemini-2.5-flash')
     
     # Improved prompt with better scoring guidelines
     prompt = f"""You are an expert character designer analyzing {len(images)} images to determine if they show the same character.
@@ -272,7 +272,7 @@ async def analyze_character(files: List[UploadFile] = File(...)):
             "color_similarity": round(avg_color_similarity, 2)
         },
         "analysis_type": "Gemini AI Vision + Color Analysis",
-        "model": "gemini-2.0-flash-exp"
+        "model": "gemini-2.5-flash"
     }
 
 if __name__ == "__main__":
