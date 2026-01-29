@@ -4,7 +4,8 @@ from typing import List
 from PIL import Image
 import numpy as np
 from sklearn.cluster import KMeans
-from google import genai  # NEW IMPORT
+from google import genai 
+from google.genai import types
 import os
 import io
 from dotenv import load_dotenv
@@ -85,10 +86,12 @@ def analyze_with_gemini(image_paths):
     images = []
     for path in image_paths:
         with open(path, 'rb') as f:
-            images.append({
-                'mime_type': 'image/png',
-                'data': f.read()
-            })
+            images.append(
+                types.Part.from_bytes(
+                    data=f.read(),
+                    mime_type='image/png'
+                )
+            )
     
     prompt = f"""You are an expert character designer analyzing {len(images)} images to determine if they show the same character.
 
@@ -132,9 +135,9 @@ Focus on character identity and defining features. Ignore backgrounds, poses, an
 
     # Try models with fallbacks
     model_names = [
-        'gemini-2.0-flash-lite-001',
-        'gemini-2.5-flash-lite',
-        'gemini-2.5-flash',
+        'gemini-2.0-flash',
+        'gemini-2.0-flash-lite',
+        'gemini-1.5-flash',
     ]
     
     for model_name in model_names:
@@ -146,7 +149,7 @@ Focus on character identity and defining features. Ignore backgrounds, poses, an
             
             response = client.models.generate_content(
                 model=model_name,
-                contents=contents
+                contents=[prompt] + images
             )
             
             return response.text
