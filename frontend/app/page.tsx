@@ -47,6 +47,7 @@ export default function Home() {
     Array.from(files).forEach((file) => {
       formData.append('files', file);
     });
+    
 
     const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000';
 
