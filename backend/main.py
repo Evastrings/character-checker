@@ -33,12 +33,16 @@ client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
 # Get port from environment
 PORT = int(os.getenv("PORT", 8000))
 
-# existing color extraction functions
-def extract_dominant_colors(image_path, n_colors=5, resize_dim=(100, 100)):
-    """Extract dominant colors from an image using K-means clustering."""
-    im = Image.open(image_path)
+# Use /tmp for temporary files (writable on Vercel)
+TEMP_DIR = "/tmp/temp_uploads"
+
+def extract_dominant_colors(image_bytes, n_colors=5, resize_dim=(100, 100)):
+    """Extract dominant colors from image bytes using K-means clustering."""
+    im = Image.open(io.BytesIO(image_bytes))
     size = resize_dim
     im2 = im.resize(size)
+    # Ensure RGB (drop alpha if present)
+    im2 = im2.convert("RGB")
     im2_array = np.asarray(im2)
     h, w, rgb = im2_array.shape
     im2_array_2d = im2_array.reshape((h*w, rgb))
@@ -57,9 +61,9 @@ def rgb_to_hex(rgb_color):
         cat2 = cat2 + format(int(value), '02x')
     return cat2
 
-def extract_palette(image_path, n_colors=5):
+def extract_palette(image_bytes, n_colors=5):
     """Extract color palette with hex codes and percentages"""
-    colors, percentages = extract_dominant_colors(image_path, n_colors)
+    colors, percentages = extract_dominant_colors(image_bytes, n_colors)
     palette = []
     for i in range(n_colors):
         rgb = colors[i].astype(int)
@@ -79,19 +83,16 @@ def compare_palettes(palette1, palette2):
     similarity = (matches / 3.0) * 100
     return similarity
 
-def analyze_with_gemini(image_paths):
-    """Use Gemini Vision to analyze character consistency - NEW SDK"""
+def analyze_with_gemini(images_bytes_list):
+    """Use Gemini Vision to analyze character consistency - works entirely in memory"""
     
-    # Load images as bytes
-    images = []
-    for path in image_paths:
-        with open(path, 'rb') as f:
-            images.append(
-                types.Part.from_bytes(
-                    data=f.read(),
-                    mime_type='image/png'
-                )
-            )
+    images = [
+        types.Part.from_bytes(
+            data=image_bytes,
+            mime_type='image/png'
+        )
+        for image_bytes in images_bytes_list
+    ]
     
     prompt = f"""You are an expert character designer analyzing {len(images)} images to determine if they show the same character.
 
@@ -133,7 +134,6 @@ RECOMMENDATIONS:
 
 Focus on character identity and defining features. Ignore backgrounds, poses, and minor artistic variations."""
 
-    # Try models with fallbacks
     model_names = [
         'gemini-2.0-flash',
         'gemini-2.0-flash-lite',
@@ -142,18 +142,11 @@ Focus on character identity and defining features. Ignore backgrounds, poses, an
     
     for model_name in model_names:
         try:
-            # Build content
-            contents = [prompt]
-            for img in images:
-                contents.append(img)
-            
             response = client.models.generate_content(
                 model=model_name,
                 contents=[prompt] + images
             )
-            
             return response.text
-            
         except Exception as e:
             print(f"Model {model_name} failed: {e}")
             continue
@@ -205,16 +198,13 @@ async def analyze_character(files: List[UploadFile] = File(...)):
     if len(files) < 2 or len(files) > 5:
         return {"error": "Please upload 2-5 images"}
     
-    os.makedirs("temp_uploads", exist_ok=True)
-    
-    image_paths = []
+    images_bytes_list = []
     palettes = []
     
     for idx, file in enumerate(files):
-        file_path = f"temp_uploads/image_{idx}.png"
-        
         content = await file.read()
         
+        # Process image in memory — normalize to RGB PNG bytes
         try:
             img = Image.open(io.BytesIO(content))
             if img.mode != 'RGB':
@@ -226,15 +216,17 @@ async def analyze_character(files: List[UploadFile] = File(...)):
                 new_size = tuple(int(dim * ratio) for dim in img.size)
                 img = img.resize(new_size, Image.Resampling.LANCZOS)
             
-            img.save(file_path, 'PNG')
+            # Save processed image back to bytes
+            buffer = io.BytesIO()
+            img.save(buffer, format='PNG')
+            processed_bytes = buffer.getvalue()
             
         except Exception as e:
             print(f"Error processing image {idx}: {e}")
-            with open(file_path, "wb") as f:
-                f.write(content)
+            processed_bytes = content  # fallback to raw bytes
         
-        image_paths.append(file_path)
-        palette = extract_palette(file_path)
+        images_bytes_list.append(processed_bytes)
+        palette = extract_palette(processed_bytes)
         palettes.append(palette)
     
     # Color similarity
@@ -248,7 +240,7 @@ async def analyze_character(files: List[UploadFile] = File(...)):
     
     # Gemini analysis
     try:
-        gemini_analysis = analyze_with_gemini(image_paths)
+        gemini_analysis = analyze_with_gemini(images_bytes_list)
         parsed = parse_ai_response(gemini_analysis)
         consistency_score = parsed['consistency_score']
         
