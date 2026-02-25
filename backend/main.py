@@ -135,9 +135,9 @@ RECOMMENDATIONS:
 Focus on character identity and defining features. Ignore backgrounds, poses, and minor artistic variations."""
 
     model_names = [
-        'gemini-2.0-flash',
-        'gemini-2.0-flash-lite',
-        'gemini-1.5-flash',
+        'gemini-2.5-flash',
+        'gemini-2.5-flash-lite',
+        'gemini-2.5-pro',
     ]
     
     for model_name in model_names:
